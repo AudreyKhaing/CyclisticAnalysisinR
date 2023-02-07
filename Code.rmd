@@ -1,0 +1,250 @@
+## installing necessary packages
+
+install.packages('tidyverse')                       
+install.packages('dplyr')
+install.packages('ggplot2')
+
+## loading necessary libraries 
+library(tidyverse) 
+library(dplyr)
+library(lubridate) 
+library(hms)
+library(data.table) 
+library(ggplot2) 
+
+## creating a data frame combining all CSV files into one 
+data_frame1 <- list.files(path="/cloud/project/data_cyclistic2021/", full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
+  bind_rows 
+
+## In order to calculate trip duration, we need to deduct the start time (of the trip) from the end time
+## But before the trip duration calculation, I need to make sure that the start_at and end_at columns are in the same format of date time.
+## Formatting the start_at and end_at columns
+data_frame2 <- data_frame1 %>% 
+  mutate(
+    started_at = ymd_hms(as_datetime(started_at)),
+    ended_at = ymd_hms(as_datetime(ended_at))
+  )
+
+## Adding columns of the duration of the trip
+data_frame2$ride_length <- as.numeric(difftime(data_frame2$ended_at, data_frame2$started_at, units = "mins"))
+
+
+## Creating columns for: day of week, month, day, year, time, hour
+data_frame2$date <- as.Date(data_frame2$started_at) 
+data_frame2$day_of_week <- lubridate::wday(data_frame2$started_at,week_start = getOption("lubridate.week.start", 1), label = TRUE) 
+data_frame2$month <- format(as.Date(data_frame2$date), "%b")
+data_frame2$day <- format(as.Date(data_frame2$date), "%d")
+data_frame2$year <- format(as.Date(data_frame2$date), "%Y")
+data_frame2$time <- format(as.Date(data_frame2$date), "%H:%M:%S") 
+data_frame2$time <- as_hms((data_frame2$started_at)) 
+data_frame2$hour <- hour(data_frame2$time) 
+
+## Using glimpse function to see the structure off data frame 2
+glimpse(data_frame2)
+
+## Data Cleaning Step 1: Removing all the rows with empty values
+data_frame2 <- na.omit(data_frame2)
+
+## Data Cleaning Step 2: Removing all the duplicate rows 
+data_frame2 <- distinct(data_frame2) #since the data frame 3 and 4 has the same number of rows, there's no duplicate data
+
+## Data Cleaning Step 3: Removing columns with ride length zero or negative 
+data_frame2 <- data_frame2[!(data_frame2$ride_length <=0),]
+
+## Data Cleaning Step 4: Formatting the trip duration between 1 and 1440 (24h) minutes
+data_frame2 = data_frame2 %>% 
+  filter(
+    between(ride_length, 1, 1440)
+  )
+
+## ANALYSIS OF DATA FRAME 2
+
+## 1. Annual number of users for Cyclistic with trip duration more than 0 in 2021
+nrow(data_frame2)
+## 2. The number of rides by each type of users for each type of bike in 2021
+data_frame2 %>%
+  group_by(member_casual, rideable_type) %>% 
+  count(rideable_type)
+## 3. Total ride by user type on each month
+data_frame2 %>%
+  group_by(member_casual) %>% 
+  count(month)%>%
+  print(n = 24)
+## 4. Total ride by user type on each hour of the day
+data_frame2 %>%
+  group_by(member_casual) %>% 
+  count(hour)%>%
+  print(n = 48)
+## 5. Average length of the ride by user type
+aggregate(data_frame2$ride_length ~ data_frame2$member_casual + data_frame2$rideable_type, FUN = mean)
+## 6. Average length of the ride by user type on each month
+aggregate(data_frame2$ride_length ~ data_frame2$member_casual + data_frame2$month, FUN = mean)
+## 7. Average length of the ride by user type on each hour of the day
+aggregate(data_frame2$ride_length ~ data_frame2$member_casual + data_frame2$hour, FUN = mean)
+
+## VISUALIZATION
+## Total Number of Rides in 2021 by Bike Types for Riders
+data_frame2 %>% 
+  group_by(member_casual, rideable_type) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(member_casual, rideable_type)  %>% 
+  ggplot(aes(x = rideable_type, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous()+
+  labs(
+    title = "Total Number of Rides in 2021 by Bike Types for Riders",
+    caption = "Graph 1",
+    x = "Types of Bike",
+    y = "Total Rides",
+    fill = "Types of rider")+
+  scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=number_of_rides),position = position_dodge(width = 1),vjust = 1.5, size = 5)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Total Number of Rides in 2021 by Month
+data_frame2$month <- factor(data_frame2$month, levels = month.abb) 
+data_frame2 %>% 
+  group_by(member_casual, month) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(member_casual, month)  %>% 
+  ggplot(aes(x = month, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous(labels = scales::comma)+
+  labs(
+    title = "Total Number of Rides in 2021 by Month",
+    caption = "Graph 2",
+    x = "Months",
+    y = "Total Rides",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=number_of_rides),position = position_dodge(width = 1),vjust = 1.5, size = 3)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Total Number of Rides in 2021 by day of the week
+data_frame2 %>% 
+  group_by(member_casual, day_of_week) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(member_casual, day_of_week)  %>% 
+  ggplot(aes(x = day_of_week, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous(labels = scales::comma)+
+  labs(
+    title = "Total Number of Rides in 2021 by day",
+    caption = "Graph 3",
+    x = "Days",
+    y = "Total Rides",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=number_of_rides),position = position_dodge(width = 1),vjust = 1.5, size = 3)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Total Number of Rides in 2021 by each hour of the day
+data_frame2 %>% 
+  group_by(member_casual, hour) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(member_casual, hour)  %>% 
+  ggplot(aes(x = hour, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous(labels = scales::comma)+
+  scale_x_continuous()+
+  labs(
+    title = "Total Number of Rides in 2021 by each hour of the day",
+    caption = "Graph 4",
+    x = "Hour",
+    y = "Total Rides",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+## Average trip duration by rider types on different bike types
+data_frame2 %>% 
+  group_by(member_casual, rideable_type) %>% 
+  summarise(average_ride = mean(ride_length)) %>% 
+  arrange(member_casual, rideable_type)  %>% 
+  ggplot(aes(x = rideable_type, y = average_ride, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous()+
+  labs(
+    title = "Average trip duration by rider types on different bike types",
+    caption = "Graph 5",
+    x = "Bike Types",
+    y = "Average length of the ride (minutes)",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=sprintf("%0.2f", round(average_ride, digits = 2))),position = position_dodge(width = 1),vjust = 1.5, size = 3)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Average trip duration by rider types on day of the week
+data_frame2 %>% 
+  group_by(member_casual, day_of_week) %>% 
+  summarise(average_ride = mean(ride_length)) %>% 
+  arrange(member_casual, day_of_week)  %>% 
+  ggplot(aes(x = day_of_week, y = average_ride, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous()+
+  labs(
+    title = "Average trip duration by rider types on different bike types",
+    caption = "Graph 6",
+    x = "Day",
+    y = "Average length of the ride (minutes)",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=sprintf("%0.2f", round(average_ride, digits = 2))),position = position_dodge(width = 1),vjust = 1.5, size = 3)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Average trip duration by rider types on each month
+data_frame2$month <- factor(data_frame2$month, levels = month.abb) 
+data_frame2 %>% 
+  group_by(member_casual, month) %>% 
+  summarise(average_ride = mean(ride_length)) %>% 
+  arrange(member_casual, month)  %>% 
+  ggplot(aes(x = month, y = average_ride, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous()+
+  labs(
+    title = "Average trip duration by rider types on each month",
+    caption = "Graph 7",
+    x = "Month",
+    y = "Average length of the ride (minutes)",
+    fill = "Types of rider"
+  )+ scale_fill_discrete(labels=c('Casual Rider', 'Member Rider'))+
+  geom_text(aes(label=sprintf("%0.2f", round(average_ride, digits = 2))),position = position_dodge(width = 1),vjust = 1.5, size = 3)+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Top 10 most popular starting station 
+data_frame2%>% 
+  group_by(member_casual, start_station_name) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(-number_of_rides)  %>% 
+  slice(1:5)%>% 
+  ggplot(aes(x = start_station_name, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous(labels = scales::comma)+
+  labs(
+    title = "Top 10 popular starting station",
+    caption = "Graph 8",
+    x = "Station Name",
+    y = "Total Rides",
+    fill = "Types of rider")+
+  scale_fill_discrete(labels=c('Casual Rider', 'Member Rider')) +
+  coord_flip()+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
+  
+## Top 10 most popular ending station 
+data_frame2%>% 
+  group_by(member_casual, end_station_name) %>% 
+  summarise(number_of_rides = n()) %>% 
+  arrange(-number_of_rides)  %>% 
+  slice(1:5)%>% 
+  ggplot(aes(x = end_station_name, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")+ 
+  scale_y_continuous(labels = scales::comma)+
+  labs(
+    title = "Top 10 popular ending station",
+    caption = "Graph 9",
+    x = "Station Name",
+    y = "Total Rides",
+    fill = "Types of rider")+ 
+  scale_fill_discrete(labels=c('Casual Rider', 'Member Rider')) +
+  coord_flip()+
+  scale_fill_manual(values=c("#56B4E9", "#009E73"))
